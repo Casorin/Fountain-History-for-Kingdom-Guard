@@ -48,5 +48,5 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'app/src') -Destination (Join-Pa
 if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
 $output = Join-Path $PSScriptRoot 'dist'
 New-Item -ItemType Directory -Force -Path $output | Out-Null
-Copy-Item -LiteralPath (Join-Path $buildRoot 'app/build/outputs/apk/debug/app-debug.apk') -Destination (Join-Path $output 'Fountain-History-0.5.2-test.apk') -Force
-Write-Host "APK: $output\Fountain-History-0.5.2-test.apk"
+Copy-Item -LiteralPath (Join-Path $buildRoot 'app/build/outputs/apk/debug/app-debug.apk') -Destination (Join-Path $output 'Fountain-History-0.5.3-test.apk') -Force
+Write-Host "APK: $output\Fountain-History-0.5.3-test.apk"

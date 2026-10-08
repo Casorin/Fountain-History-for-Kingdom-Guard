@@ -2,6 +2,7 @@ package to.casorin.fountain;
 
 /** Pure observation logic: no Android APIs and no input commands. */
 public final class ResetTracker {
+    static final long CONFIRM_WINDOW_MS = 2500;
     public record Event(long observedAt, long previousFund, Long intervalMs) {}
     public long current;
     public long lastReset;
@@ -10,6 +11,7 @@ public final class ResetTracker {
     private long lastFrame;
     private long lastReadable;
     private long candidateAt;
+    private long candidateFrame;
     private long candidateValue;
     private int candidateHits;
     private boolean armed = true;
@@ -18,8 +20,9 @@ public final class ResetTracker {
     public Event observe(Long value, long frameTime, long wallTime) {
         if (frameTime <= lastFrame) return null;
         lastFrame = frameTime;
+        // Occluded frames are not evidence, but must not erase recent verified reads.
+        if (candidateHits > 0 && frameTime - candidateFrame > CONFIRM_WINDOW_MS) candidateHits = 0;
         if (value == null || value < 1000 || value > 9999999) {
-            candidateHits = 0;
             return null;
         }
         if (lastReadable != 0 && frameTime - lastReadable > 15000) {
@@ -51,6 +54,7 @@ public final class ResetTracker {
         }
         if (candidateHits == 0 || value > candidateValue + 4000) {
             candidateAt = wallTime;
+            candidateFrame = frameTime;
             candidateValue = value;
             candidateHits = 1;
             return null;
@@ -68,10 +72,13 @@ public final class ResetTracker {
     }
 
     public void restartSession() {
-        peak = baseline = current = lastFrame = lastReadable = highCandidate = 0;
+        peak = baseline = current = lastFrame = lastReadable = highCandidate = candidateFrame = 0;
         candidateHits = 0;
         armed = true;
         // Do not use the previous session to compute an interval across a gap.
         lastReset = 0;
     }
+
+    int confirmationHits() { return candidateHits; }
+    long confirmationStarted() { return candidateHits == 0 ? 0 : candidateFrame; }
 }

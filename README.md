@@ -5,22 +5,22 @@
 Приложение для телефона или планшета: история обнулений, прошлый фонд
 и таймер поверх Kingdom Guard. **Без кликов и расхода самоцветов.**
 
-## [СКАЧАТЬ ПРИЛОЖЕНИЕ ДЛЯ ANDROID](https://github.com/Casorin/Fountain-History-for-Kingdom-Guard/releases/download/v0.5.2/Fountain-History-0.5.2-test.apk)
+## [СКАЧАТЬ ПРИЛОЖЕНИЕ ДЛЯ ANDROID](https://github.com/Casorin/Fountain-History-for-Kingdom-Guard/releases/download/v0.5.3/Fountain-History-0.5.3-test.apk)
 
-**Тестовая версия 0.5.2. Android 10 и новее. Не для iPhone.**
+**Тестовая версия 0.5.3. Android 10 и новее. Не для iPhone.**
 Работа на всех моделях телефонов и планшетов пока не проверена.
 
 ## Как скачать
 
 1. Откройте эту страницу на телефоне или планшете и нажмите большую ссылку **«СКАЧАТЬ ПРИЛОЖЕНИЕ ДЛЯ ANDROID»** выше.
-2. Дождитесь загрузки **Fountain-History-0.5.2-test.apk**.
+2. Дождитесь загрузки **Fountain-History-0.5.3-test.apk**.
 3. Откройте файл в уведомлении или в «Мои файлы» / «Файлы» → «Загрузки».
 4. Нажмите **«Установить»**, затем **«Открыть»**.
 
 Если ищете файл вручную, откройте
-[страницу скачивания](https://github.com/Casorin/Fountain-History-for-Kingdom-Guard/releases/tag/v0.5.2),
+[страницу скачивания](https://github.com/Casorin/Fountain-History-for-Kingdom-Guard/releases/tag/v0.5.3),
 прокрутите до **Assets** («Файлы выпуска»), раскройте список и выберите
-**Fountain-History-0.5.2-test.apk**. **Source code (zip)**,
+**Fountain-History-0.5.3-test.apk**. **Source code (zip)**,
 **Source code (tar.gz)** и зелёная кнопка **Code** не нужны.
 
 **[Полная инструкция по установке и настройке](DOWNLOAD-RU.md)**
@@ -116,7 +116,7 @@ Android может попросить разрешить установку из
 <summary>Для разработчиков</summary>
 
 Сборка из PowerShell: `./bootstrap.ps1`. Результат:
-`dist/Fountain-History-0.5.2-test.apk`, подписанный тестовым ключом Android.
+`dist/Fountain-History-0.5.3-test.apk`, подписанный тестовым ключом Android.
 Для стабильного выпуска нужен постоянный ключ подписи и дополнительные
 проверки на реальных устройствах.
 

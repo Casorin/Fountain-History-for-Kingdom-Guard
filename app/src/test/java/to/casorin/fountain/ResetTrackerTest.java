@@ -22,13 +22,58 @@ public class ResetTrackerTest {
         t.observe(5000L, 200, 10100);
         for (int i = 0; i < 10; i++) assertNull(t.observe(5000L, 200, 10100));
     }
-    @Test public void overlapCancelsDropCandidate() {
+    @Test public void shortOverlapKeepsOnlyVerifiedDropReadings() {
         ResetTracker t = new ResetTracker();
         t.observe(60000L, 100, 10000);
         t.observe(5000L, 200, 10100);
         t.observe(null, 300, 10200);
         assertNull(t.observe(6000L, 400, 10300));
-        assertNull(t.observe(6000L, 500, 10400));
+        assertNotNull(t.observe(6000L, 500, 10400));
+    }
+    @Test public void unreadableFramesCannotConfirmDrop() {
+        ResetTracker t = new ResetTracker();
+        t.observe(60000L,100,10000); t.observe(5000L,200,10100);
+        for (int i=3;i<20;i++) assertNull(t.observe(null,i*100,10000+i*100));
+        assertEquals(1,t.confirmationHits());
+        assertEquals(0,t.lastReset);
+    }
+    @Test public void confirmationWindowExpiresEvenAcrossReadableFrames() {
+        ResetTracker t = new ResetTracker();
+        t.observe(60000L,100,10000); t.observe(5000L,200,10100);
+        assertNull(t.observe(5100L,1600,11500));
+        assertNull(t.observe(5200L,2701,12601));
+        assertEquals(1,t.confirmationHits());
+        assertNull(t.observe(5300L,3000,12900));
+        assertNotNull(t.observe(5400L,3300,13200));
+    }
+    @Test public void longOverlapDiscardsOldCandidate() {
+        ResetTracker t = new ResetTracker();
+        t.observe(60000L,100,10000); t.observe(5000L,200,10100);
+        t.observe(null,2701,12601);
+        assertEquals(0,t.confirmationHits());
+        assertNull(t.observe(6000L,2800,12700));
+        assertNull(t.observe(6100L,3000,12900));
+        ResetTracker.Event e=t.observe(6200L,3200,13100);
+        assertEquals(12700,e.observedAt());
+    }
+    @Test public void intermittentOverlapDoesNotDelayConfirmationUntilClicksStop() {
+        ResetTracker t = new ResetTracker();
+        t.observe(60000L,100,10000);
+        t.observe(5000L,700,10600);
+        t.observe(null,850,10750);
+        t.observe(5100L,1300,11200);
+        t.observe(null,1450,11350);
+        ResetTracker.Event e=t.observe(5200L,1900,11800);
+        assertNotNull(e);
+        assertEquals(10600,e.observedAt());
+        assertEquals(60000,e.previousFund());
+    }
+    @Test public void recoveryAfterOverlapStillCancelsCandidate() {
+        ResetTracker t = new ResetTracker();
+        t.observe(60000L,100,10000); t.observe(5000L,200,10100);
+        t.observe(null,300,10200); t.observe(60000L,400,10300);
+        assertNull(t.observe(5000L,500,10400));
+        assertNull(t.observe(5100L,600,10500));
     }
     @Test public void longGapDoesNotInventReset() {
         ResetTracker t = new ResetTracker();

@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -21,11 +22,13 @@ public final class OcrProbe extends Instrumentation {
     private int index;
     private String anchor;
     private boolean signals;
+    private boolean calibrateFirst;
 
     @Override public void onCreate(Bundle args) {
         super.onCreate(args);
         anchor = args.getString("anchor", "");
         signals = Boolean.parseBoolean(args.getString("signals","false"));
+        calibrateFirst = Boolean.parseBoolean(args.getString("calibrateFirst","false"));
         region = new double[]{Double.parseDouble(args.getString("left", ".18270981")),
             Double.parseDouble(args.getString("top", ".32157174")),
             Double.parseDouble(args.getString("right", ".30718532")),
@@ -57,10 +60,13 @@ public final class OcrProbe extends Instrumentation {
                 }));
                 return;
             }
+            if (calibrateFirst && index == 1) anchor = FountainGuard.encode(FountainGuard.signature(image,region));
             boolean heading = FountainGuard.matches(image,region,anchor);
+            long started = SystemClock.elapsedRealtime();
             reader.readDetailed(image,region,result -> main.post(() -> {
                 output.add(file+": "+result.value()+"; heading="+heading+"; "+result.detail()+"; raw="+result.rawText()
-                    +"; mask="+result.maskText()+"; alternate="+result.alternateText());
+                    +"; mask="+result.maskText()+"; alternate="+result.alternateText()
+                    +"; elapsedMs="+(SystemClock.elapsedRealtime()-started));
                 image.recycle(); next();
             }));
         } catch (Exception error) { output.add(file+": "+error); next(); }

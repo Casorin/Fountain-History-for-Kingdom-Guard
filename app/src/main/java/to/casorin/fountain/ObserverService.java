@@ -49,8 +49,8 @@ public final class ObserverService extends Service {
     private volatile boolean panelOverFund;
     private volatile long pauseUntil;
     private volatile int frameWidth, frameHeight;
-    private volatile int attemptedReads, acceptedReads, hiddenReads, failedReads, frameErrors;
-    private volatile long lastAcceptedAt, lastReadDuration;
+    private volatile int attemptedReads, acceptedReads, hiddenReads, failedReads, frameErrors, expiredReads;
+    private volatile long lastAcceptedAt, lastReadDuration, lastBalanceDuration, lastResetConfirmationMs;
     private long lastDiagnostic;
 
     @Override public IBinder onBind(Intent intent) { return null; }
@@ -116,6 +116,7 @@ public final class ObserverService extends Service {
         try { image = source.acquireLatestImage(); } catch (IllegalStateException ignored) { return; }
         if (image == null) return;
         long now = SystemClock.elapsedRealtime();
+        long capturedWallTime = System.currentTimeMillis();
         if (!captureVisible || MainActivity.visible) { polling.restartSession(); lastFountainAt=0; }
         if (ending || !captureVisible || MainActivity.visible || panelMoving || now < pauseUntil
                 || now-lastSample < polling.intervalMs() || processing.get()) { image.close(); return; }
@@ -151,6 +152,7 @@ public final class ObserverService extends Service {
         boolean recentFountain=lastFountainAt>0 && (now-lastFountainAt<=15000 || polling.fast());
         processing.set(true);
         int capturedGeneration = generation;
+        double[] balanceRegion = null;
         if(recentFountain) {
             Bitmap small=Bitmap.createScaledBitmap(frame,200,Math.max(1,frame.getHeight()*200/frame.getWidth()),false);
             int[] pixels=new int[small.getWidth()*small.getHeight()];
@@ -158,20 +160,10 @@ public final class ObserverService extends Service {
             polling.reward(WishPixels.reward(pixels,small.getWidth(),small.getHeight(),store.region()),now);
             // Once accelerated, leave OCR capacity for the fund instead of rechecking spending.
             boolean checkBalance=!polling.fast() && now-lastSignalCheck>=AdaptivePolling.SIGNAL_MS;
-            double[] balanceRegion=checkBalance
-                ? WishPixels.balanceRegion(pixels,small.getWidth(),small.getHeight(),store.region()) : null;
+            balanceRegion=checkBalance ? WishPixels.balanceRegion(pixels,small.getWidth(),small.getHeight(),store.region()) : null;
             if(small!=frame) small.recycle();
-            if(checkBalance) {
-                lastSignalCheck=now;
-                recognizer.readBalance(frame,balanceRegion,value -> main.post(() -> {
-                    if(!validFrame(now,capturedGeneration)) { frame.recycle();processing.set(false);return; }
-                    polling.balance(value,SystemClock.elapsedRealtime());
-                    readFund(frame,now,capturedGeneration,fountainVisible);
-                }));
-                return;
-            }
         }
-        readFund(frame,now,capturedGeneration,fountainVisible);
+        readFund(frame,now,capturedWallTime,capturedGeneration,fountainVisible,balanceRegion);
     }
 
     private boolean validFrame(long now,int capturedGeneration) {
@@ -179,31 +171,61 @@ public final class ObserverService extends Service {
             && !panelOverFund && SystemClock.elapsedRealtime()>=pauseUntil && SystemClock.elapsedRealtime()-now<=1500;
     }
 
-    private void readFund(Bitmap frame,long now,int capturedGeneration,boolean fountainVisible) {
+    private void readFund(Bitmap frame,long now,long capturedWallTime,int capturedGeneration,boolean fountainVisible,double[] balanceRegion) {
         if(!validFrame(now,capturedGeneration)) { frame.recycle();processing.set(false);return; }
         if(!fountainVisible) {
-            frame.recycle(); current=0; status="Фонтан не виден или закрыт уведомлением";
-            hiddenReads++; diagnostic(now); processing.set(false);
-            main.post(() -> { if(validFrame(now,capturedGeneration)) tracker.observe(null,now,System.currentTimeMillis()); });
+            current=0; status="Фонтан не виден или закрыт уведомлением";
+            hiddenReads++; diagnostic(now);
+            main.post(() -> {
+                boolean checkingBalance = false;
+                try {
+                    if (!validFrame(now,capturedGeneration)) return;
+                    tracker.observe(null,now,capturedWallTime);
+                    checkingBalance = readBalanceAfterFund(frame,now,capturedGeneration,balanceRegion);
+                } finally { if (!checkingBalance) { frame.recycle();processing.set(false); } }
+            });
             return;
         }
         attemptedReads++;
         recognizer.readDetailed(frame, store.region(), result -> {
             main.post(() -> {
+                boolean checkingBalance = false;
                 try {
                     if (ending || capturedGeneration != generation || !captureVisible || MainActivity.visible || panelMoving || panelOverFund
-                        || SystemClock.elapsedRealtime() < pauseUntil || SystemClock.elapsedRealtime()-now > 1500) return;
+                        || SystemClock.elapsedRealtime() < pauseUntil) return;
+                    lastReadDuration = SystemClock.elapsedRealtime()-now;
+                    if (lastReadDuration > 1500) { expiredReads++; return; }
                     Long value = result.value();
-                    ResetTracker.Event event = tracker.observe(value, now, System.currentTimeMillis());
+                    long confirmationStarted = tracker.confirmationStarted();
+                    ResetTracker.Event event = tracker.observe(value, now, capturedWallTime);
                     current = value == null ? 0 : tracker.current;
                     status = value == null ? result.detail() : "Фонд читается · наблюдение включено";
-                    lastReadDuration = SystemClock.elapsedRealtime()-now;
                     if (value != null) { acceptedReads++; lastAcceptedAt = SystemClock.elapsedRealtime(); }
                     else failedReads++;
                     diagnostic(SystemClock.elapsedRealtime());
-                    if (event != null) { store.append(event); polling.confirmedReset(); }
-                } finally { frame.recycle(); processing.set(false); }
+                    if (event != null) {
+                        store.append(event); polling.confirmedReset();
+                        lastResetConfirmationMs = SystemClock.elapsedRealtime()-confirmationStarted;
+                        refreshPanel();
+                    }
+                    // Fund confirmation has priority; spending checks never precede it.
+                    if (event == null) checkingBalance = readBalanceAfterFund(frame,now,capturedGeneration,balanceRegion);
+                } finally { if (!checkingBalance) { frame.recycle(); processing.set(false); } }
             });
+        });
+    }
+
+    private boolean readBalanceAfterFund(Bitmap frame,long now,int capturedGeneration,double[] region) {
+        if (region == null || polling.fast() || tracker.confirmationHits() > 0 || !validFrame(now,capturedGeneration)) return false;
+        lastSignalCheck = now;
+        return frames.post(() -> {
+            long started = SystemClock.elapsedRealtime();
+            recognizer.readBalance(frame,region,balance -> main.post(() -> {
+                try {
+                    lastBalanceDuration = SystemClock.elapsedRealtime()-started;
+                    if (validFrame(now,capturedGeneration)) polling.balance(balance,now);
+                } finally { frame.recycle();processing.set(false); }
+            }));
         });
     }
 
@@ -227,6 +249,10 @@ public final class ObserverService extends Service {
             +"\nПопыток OCR: "+attemptedReads+"; успешных: "+acceptedReads+"; без результата: "+failedReads
             +"\nПроверок с закрытым фонтаном: "+hiddenReads+"; ошибок получения кадра: "+frameErrors
             +"\nПоследнее распознавание, мс: "+lastReadDuration
+            +"\nПросроченных результатов OCR: "+expiredReads
+            +"\nПоследняя проверка баланса, мс: "+lastBalanceDuration
+            +"\nПодтверждающих кадров обнуления: "+tracker.confirmationHits()+" / 3; окно подтверждения, мс: "+ResetTracker.CONFIRM_WINDOW_MS
+            +"\nПоследнее подтверждение обнуления, мс: "+lastResetConfirmationMs
             +"\nИнтервал проверки фонда, мс: "+polling.intervalMs()+"; ускорение: "+polling.fast()
             +"\nПричина ускорения: "+polling.reason()+"; награды / расходы: "+polling.rewardTriggers()+" / "+polling.balanceTriggers()
             +"\nС последнего успешного чтения, мс: "+(lastAcceptedAt == 0 ? "нет данных" : SystemClock.elapsedRealtime()-lastAcceptedAt)
@@ -340,19 +366,21 @@ public final class ObserverService extends Service {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             if (ending) return;
-            if (panel != null) {
-                org.json.JSONObject row = store.events().optJSONObject(0);
-                String message = current > 0 ? "Фонд: "+HistoryStore.amount(current)
-                    : !store.calibrated() ? "Настройте область" : panelOverFund ? "Панель закрывает фонд"
-                    : !captureVisible ? "Игра скрыта"
-                    : status.contains("уведомлением") ? "Уведомление закрывает фонд"
-                    : "Цифры не читаются · ≡";
-                panel.update(row == null ? "Ждём обнуление" : HistoryStore.duration(System.currentTimeMillis()-row.optLong("time")),
-                    "Прошлый: "+(row == null ? "—" : HistoryStore.amount(row.optLong("fund"))),message,!store.calibrated());
-            }
+            refreshPanel();
             main.postDelayed(this, 1000);
         }
     };
+    private void refreshPanel() {
+        if (panel == null || ending) return;
+        org.json.JSONObject row = store.events().optJSONObject(0);
+        String message = current > 0 ? "Фонд: "+HistoryStore.amount(current)
+            : !store.calibrated() ? "Настройте область" : panelOverFund ? "Панель закрывает фонд"
+            : !captureVisible ? "Игра скрыта"
+            : status.contains("уведомлением") ? "Уведомление закрывает фонд"
+            : "Цифры не читаются · ≡";
+        panel.update(row == null ? "Ждём обнуление" : HistoryStore.duration(System.currentTimeMillis()-row.optLong("time")),
+            "Прошлый: "+(row == null ? "—" : HistoryStore.amount(row.optLong("fund"))),message,!store.calibrated());
+    }
     @Override public void onDestroy() {
         if (store != null) store.preferences.edit().putString("lastDiagnostic", diagnosticSnapshot()).apply();
         savePanel.run(); ending = true; generation++; main.removeCallbacks(tick); main.removeCallbacks(savePanel); hideCloseTarget();
