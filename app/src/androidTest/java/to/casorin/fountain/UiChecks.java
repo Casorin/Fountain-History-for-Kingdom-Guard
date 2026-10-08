@@ -44,6 +44,8 @@ public final class UiChecks extends Instrumentation {
                 GradientDrawable thumb = (GradientDrawable)table.getVerticalScrollbarThumbDrawable();
                 require(thumb.getColor().getDefaultColor()==android.graphics.Color.parseColor("#FF9CBF"),"pink scrollbar");
                 checkFooter(root);
+                checkPermissionPrompt((MainActivity)activity);
+                for (float scale : new float[]{.65f,1f,1.8f}) checkSetupPanel(scale);
                 android.graphics.drawable.Drawable icon=getTargetContext().getApplicationInfo().loadIcon(getTargetContext().getPackageManager());
                 require(icon instanceof AdaptiveIconDrawable,"adaptive launcher icon");
                 if(android.os.Build.VERSION.SDK_INT>=33) require(((AdaptiveIconDrawable)icon).getMonochrome()!=null,"themed icon");
@@ -55,7 +57,7 @@ public final class UiChecks extends Instrumentation {
                 } catch(java.io.IOException error) { throw new IllegalStateException(error); }
                 finally { preview.recycle(); }
             });
-            result.putString("stream","OK: 15 viewport cases (0/1/5/6/200 rows, three font sizes), pink scrollbar, footer, diagnostics and UI labels. History unchanged.\n");
+            result.putString("stream","OK: 15 viewport cases, permission prompt return/grant/denial/duplicate, setup hint at three sizes, scrollbar, footer, diagnostics and UI labels. History unchanged.\n");
             finish(Activity.RESULT_OK,result);
         } catch (Throwable error) {
             result.putString("stream","FAIL: "+error+"\n");
@@ -88,6 +90,55 @@ public final class UiChecks extends Instrumentation {
         require(expected==viewport.getMeasuredHeight(),"five complete rows: "+count+" / font "+font);
         require(rows.getChildCount()==count,"all rows preserved");
         require(viewport.canScrollVertically(1)==(count>5),"scroll beyond five rows");
+    }
+
+    private void checkPermissionPrompt(MainActivity activity) {
+        try {
+            java.lang.reflect.Field field=MainActivity.class.getDeclaredField("overlayPermissionDialog");
+            field.setAccessible(true);
+            activity.showOverlayPermissionPrompt();
+            android.app.AlertDialog prompt=(android.app.AlertDialog)field.get(activity);
+            require(prompt != null && prompt.isShowing(),"permission explanation shown");
+            activity.showOverlayPermissionPrompt();
+            require(field.get(activity)==prompt,"no duplicate permission prompt");
+            activity.reconcileOverlayPermission(false);
+            require(prompt.isShowing(),"permission not assumed after denial");
+            java.lang.reflect.Field awaiting=MainActivity.class.getDeclaredField("awaitingOverlaySettings");
+            awaiting.setAccessible(true); awaiting.setBoolean(activity,true);
+            activity.reconcileOverlayPermission(true);
+            require(!prompt.isShowing() && field.get(activity)==null,"stale prompt dismissed after grant");
+            require(!awaiting.getBoolean(activity),"return to settings consumed once");
+            activity.reconcileOverlayPermission(true);
+            require(field.get(activity)==null,"granted permission does not reopen prompt");
+        } catch(ReflectiveOperationException error) { throw new IllegalStateException(error); }
+    }
+
+    private void checkSetupPanel(float scale) {
+        FloatingPanel panel=new FloatingPanel(getTargetContext(),scale,false,new FloatingPanel.Listener() {
+            public void dragStarted() {}
+            public void dragged(float dx,float dy,float x,float y) {}
+            public void dragFinished(float x,float y,boolean cancelled) {}
+            public void resized(float size) {}
+            public void history() {}
+            public void close() {}
+        });
+        int normal=panel.windowHeight();
+        panel.update("Ждём обнуление","Прошлый: —","Настройте область",true);
+        require(panel.windowHeight()>normal,"setup hint has its own second line");
+        require(panel.getContentDescription().toString().contains("Вернитесь в «Фонтан · История»"),"return to application explained");
+        require(panel.getContentDescription().toString().contains("Настроить область фонда"),"exact setup button explained");
+        float density=getTargetContext().getResources().getDisplayMetrics().density;
+        TextPaint paint=new TextPaint();paint.setTextSize(9*density*panel.scale());
+        paint.setTypeface(android.graphics.Typeface.create("sans-serif-condensed",android.graphics.Typeface.NORMAL));
+        require(paint.measureText(FloatingPanel.SETUP_RETURN)<=panel.windowWidth()-18*density*panel.scale(),"first hint line not clipped");
+        paint.setTypeface(android.graphics.Typeface.create("sans-serif-condensed",android.graphics.Typeface.BOLD));
+        require(paint.measureText(FloatingPanel.SETUP_ACTION)<=panel.windowWidth()-33*density*panel.scale(),"second hint line not clipped");
+        panel.measure(View.MeasureSpec.makeMeasureSpec(panel.windowWidth(),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(panel.windowHeight(),View.MeasureSpec.EXACTLY));
+        panel.layout(0,0,panel.getMeasuredWidth(),panel.getMeasuredHeight());
+        Bitmap image=Bitmap.createBitmap(panel.getWidth(),panel.getHeight(),Bitmap.Config.ARGB_8888);
+        panel.draw(new Canvas(image));image.recycle();
+        panel.update("Ждём обнуление","Прошлый: —","Фонд прочитан",false);
+        require(panel.windowHeight()==normal,"compact panel restored after setup");
     }
 
     private boolean hasText(View view,String value) {

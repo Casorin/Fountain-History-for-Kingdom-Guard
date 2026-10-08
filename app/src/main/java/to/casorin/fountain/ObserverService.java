@@ -348,7 +348,7 @@ public final class ObserverService extends Service {
                     : status.contains("уведомлением") ? "Уведомление закрывает фонд"
                     : "Цифры не читаются · ≡";
                 panel.update(row == null ? "Ждём обнуление" : HistoryStore.duration(System.currentTimeMillis()-row.optLong("time")),
-                    "Прошлый: "+(row == null ? "—" : HistoryStore.amount(row.optLong("fund"))),message);
+                    "Прошлый: "+(row == null ? "—" : HistoryStore.amount(row.optLong("fund"))),message,!store.calibrated());
             }
             main.postDelayed(this, 1000);
         }

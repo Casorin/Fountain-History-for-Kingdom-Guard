@@ -26,6 +26,9 @@ final class FloatingPanel extends View {
     private final ScaleGestureDetector scaler;
     private float size, downX, downY, downScale, downWidth, tapX, tapY;
     private boolean expanded, dragging, resizing, pinched;
+    private boolean setupHint;
+    static final String SETUP_RETURN = "Вернитесь в «Фонтан · История»";
+    static final String SETUP_ACTION = "→ «Настроить область фонда»";
     private String timer = "Ждём обнуление", previous = "Прошлый: —", status = "Подготовка";
 
     FloatingPanel(Context context, float scale, boolean dark, Listener listener) {
@@ -45,15 +48,18 @@ final class FloatingPanel extends View {
         });
     }
     int windowWidth() { return Math.round(168*density*size); }
-    int windowHeight() { return Math.round(unit(expanded ? 99 : 70)); }
+    int windowHeight() { return Math.round(unit((expanded ? 99 : 70)+(setupHint ? 14 : 0))); }
     float scale() { return size; }
     private float unit(float value) { return value*density*size; }
     private void setSize(float value) {
         size = PanelGeometry.scale(value); requestLayout(); invalidate(); listener.resized(size);
     }
-    void update(String time, String fund, String message) {
+    void update(String time, String fund, String message, boolean needsSetup) {
+        boolean geometryChanged = setupHint != needsSetup;
+        setupHint = needsSetup;
         timer = time; previous = fund; status = message;
-        setContentDescription(time+". "+fund+". "+message+". Нажмите для кнопок: уменьшить, увеличить, история, закрыть. Панель можно перетащить.");
+        setContentDescription(time+". "+fund+". "+(setupHint ? SETUP_RETURN+". "+SETUP_ACTION : message)+". Нажмите для кнопок: уменьшить, увеличить, история, закрыть. Панель можно перетащить.");
+        if (geometryChanged) { requestLayout(); listener.resized(size); }
         invalidate();
     }
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
@@ -70,12 +76,16 @@ final class FloatingPanel extends View {
         drawCentered(canvas,"Стоп",stop,10,Color.rgb(17,28,85),true);
         drawText(canvas,timer,unit(9),unit(23),stop.left-unit(14),14,ink,true);
         drawText(canvas,previous,unit(9),unit(43),getWidth()-unit(18),11,ink,false);
-        drawText(canvas,status,unit(9),unit(59),getWidth()-unit(33),9,muted,false);
+        if (setupHint) {
+            drawText(canvas,SETUP_RETURN,unit(9),unit(59),getWidth()-unit(18),9,muted,false);
+            drawText(canvas,SETUP_ACTION,unit(9),unit(73),getWidth()-unit(33),9,muted,true);
+        } else drawText(canvas,status,unit(9),unit(59),getWidth()-unit(33),9,muted,false);
         if (expanded) {
             String[] titles = {"−","+","≡","×"};
             float total = unit(4*27+3*5), left = (getWidth()-total)/2;
             for (int i = 0; i < actions.length; i++) {
-                actions[i].set(left+i*unit(32),unit(68),left+i*unit(32)+unit(27),unit(92));
+                float shift = setupHint ? 14 : 0;
+                actions[i].set(left+i*unit(32),unit(68+shift),left+i*unit(32)+unit(27),unit(92+shift));
                 paint.setColor(i == 3 ? Color.rgb(255,156,191) : Color.argb(110,159,211,249));
                 canvas.drawRoundRect(actions[i],unit(6),unit(6),paint);
                 drawCentered(canvas,titles[i],actions[i],16,i == 3 ? Color.rgb(17,28,85) : ink,true);

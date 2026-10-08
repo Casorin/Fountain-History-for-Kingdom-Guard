@@ -7,8 +7,8 @@ android {
         applicationId 'to.casorin.fountain'
         minSdk 29
         targetSdk 36
-        versionCode 6
-        versionName '0.5.1-test'
+        versionCode 7
+        versionName '0.5.2-test'
         testInstrumentationRunner 'to.casorin.fountain.UiChecks'
     }
     compileOptions {

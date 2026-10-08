@@ -29,12 +29,15 @@ public final class MainActivity extends Activity {
     private HistoryScrollView historyScroll;
     private TextView status, timer, previous, current;
     private Button start;
+    private AlertDialog overlayPermissionDialog;
+    private boolean awaitingOverlaySettings;
     private boolean dark;
     private int ink, muted, background, card, blue, pink;
     private String renderedHistory = "";
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved); store = new HistoryStore(this);
+        awaitingOverlaySettings = saved != null && saved.getBoolean("awaitingOverlaySettings");
         dark = store.preferences.getBoolean("dark", false); build();
     }
     private void build() {
@@ -129,10 +132,7 @@ public final class MainActivity extends Activity {
     }
     private void begin() {
         if (!Settings.canDrawOverlays(this)) {
-            new AlertDialog.Builder(this).setTitle("Таймер поверх игры")
-                .setMessage("В следующем окне разрешите приложению «Фонтан · История» показываться поверх других приложений. После этого вернитесь сюда и нажмите «Начать наблюдение».")
-                .setNegativeButton("Отмена", null).setPositiveButton("Открыть настройку", (d, w) ->
-                    startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:"+getPackageName())))).show();
+            showOverlayPermissionPrompt();
             return;
         }
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -146,6 +146,38 @@ public final class MainActivity extends Activity {
                 MediaProjectionManager manager = getSystemService(MediaProjectionManager.class);
                 startActivityForResult(manager.createScreenCaptureIntent(), 22);
             }).show();
+    }
+    void showOverlayPermissionPrompt() {
+        if (overlayPermissionDialog != null && overlayPermissionDialog.isShowing()) return;
+        overlayPermissionDialog = new AlertDialog.Builder(this).setTitle("Таймер поверх игры")
+            .setMessage("Разрешите приложению «Фонтан · История» показ поверх других приложений. Затем вернитесь сюда и нажмите «Начать наблюдение».")
+            .setNegativeButton("Отмена", null).setPositiveButton("Открыть настройку", (dialog, which) -> {
+                // Dismiss before leaving: some devices otherwise restore a stale prompt.
+                dismissOverlayPermissionPrompt();
+                awaitingOverlaySettings = true;
+                try {
+                    startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:"+getPackageName())));
+                } catch (ActivityNotFoundException error) {
+                    awaitingOverlaySettings = false;
+                    message("Откройте настройки Android → Приложения → Специальный доступ → Поверх других приложений → Фонтан · История.");
+                }
+            }).create();
+        overlayPermissionDialog.setOnDismissListener(dialog -> {
+            if (overlayPermissionDialog == dialog) overlayPermissionDialog = null;
+        });
+        overlayPermissionDialog.show();
+    }
+    private void dismissOverlayPermissionPrompt() {
+        AlertDialog dialog = overlayPermissionDialog;
+        overlayPermissionDialog = null;
+        if (dialog != null) dialog.dismiss();
+    }
+    void reconcileOverlayPermission(boolean granted) {
+        if (granted) dismissOverlayPermissionPrompt();
+        if (awaitingOverlaySettings) {
+            awaitingOverlaySettings = false;
+            if (granted) Toast.makeText(this,"Доступ разрешён. Нажмите «Начать наблюдение»",Toast.LENGTH_LONG).show();
+        }
     }
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results); if (code == 21) begin();
@@ -345,7 +377,19 @@ public final class MainActivity extends Activity {
     private void cell(LinearLayout row, String value, float weight) { TextView t = text(value,12,false,ink); t.setGravity(Gravity.CENTER); t.setPadding(dp(2),dp(10),dp(2),dp(10)); row.addView(t,new LinearLayout.LayoutParams(0,-2,weight)); }
     private int dp(int value) { return (int)(value*getResources().getDisplayMetrics().density+.5f); }
     private final Runnable tick = new Runnable() { @Override public void run() { refresh(); ui.postDelayed(this,1000); } };
-    @Override protected void onResume() { super.onResume(); visible = true; ui.removeCallbacks(tick); tick.run(); }
+    @Override protected void onResume() {
+        super.onResume(); visible = true;
+        reconcileOverlayPermission(Settings.canDrawOverlays(this));
+        ui.removeCallbacks(tick); tick.run();
+    }
+    @Override protected void onSaveInstanceState(Bundle saved) {
+        saved.putBoolean("awaitingOverlaySettings",awaitingOverlaySettings);
+        super.onSaveInstanceState(saved);
+    }
     @Override protected void onPause() { visible = false; ui.removeCallbacks(tick); super.onPause(); }
-    @Override protected void onDestroy() { ui.removeCallbacks(tick); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        ui.removeCallbacks(tick);
+        dismissOverlayPermissionPrompt();
+        super.onDestroy();
+    }
 }
